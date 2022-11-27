@@ -9,7 +9,7 @@ import mido
 
 parser = argparse.ArgumentParser(description='converts a synthesia-like video into a midi file')
 parser.add_argument("filename")
-parser.add_argument("-d", "--detected", action="store_true", help="display detected notes 1 by 1")
+parser.add_argument("-d", "--detected", action="store_true", help="display detected notes")
 
 args = parser.parse_args()
 video = moviepy.editor.VideoFileClip(args.filename)
@@ -200,31 +200,45 @@ plt.show()
 
 #display detected notes
 if(args.detected):
-    for frameIndex in range(startFrameIndex, endFrameIndex+1):
-        if(noteOns[frameIndex-startFrameIndex].any()):
-            frame = video.get_frame(frameIndex/video.fps).copy()
-            for i in range(i1, i2+1):
-                if(notes[frameIndex-startFrameIndex, i]):
-                    if(i in WHITE_NOTES):
-                        j = WHITE_NOTES.index(i)-j1
-                        x = (j+0.5)*video.size[0]/(j2-j1+1)
-                        y = sldrWhiteY.val
-                        width = sldrWhiteWidth.val
-                        height = sldrWhiteHeight.val
-                        col = (0, 0, 255)
-                    else:
-                        j = WHITE_NOTES.index(i+1)-j1
-                        x = j*video.size[0]/(j2-j1+1)
-                        y = sldrBlackY.val
-                        width = sldrBlackWidth.val
-                        height = sldrBlackHeight.val
-                        col = (0, 255, 0)
-                    minX = max(0, int(x-width/2))
-                    maxX = int(x+width/2)
-                    minY = max(0, int(y-height/2))
-                    maxY = int(y+height/2)
-                    diff = np.sum(noteRegions[i] - frame[minY:maxY, minX:maxX]) / np.prod(noteRegions[i].shape)
-                    frame[minY:maxY, minX:maxX] = (255, 0, 0)
-                    frame[int(maxY-height*abs(diff)/255):maxY, minX:maxX] = col
-            plt.imshow(frame)
-            plt.show()
+    figure = plt.figure()
+    subplots = figure.subplots()
+    plt.subplots_adjust(bottom=0.12)
+    def updateDetectionFrame(_):
+        frameIndex = sldrTime.val
+        frame = video.get_frame(frameIndex/video.fps).copy()
+        for i in range(i1, i2+1):
+            if(notes[frameIndex-startFrameIndex, i]):
+                if(i in WHITE_NOTES):
+                    j = WHITE_NOTES.index(i)-j1
+                    x = (j+0.5)*video.size[0]/(j2-j1+1)
+                    y = sldrWhiteY.val
+                    width = sldrWhiteWidth.val
+                    height = sldrWhiteHeight.val
+                    col = (0, 0, 255)
+                else:
+                    j = WHITE_NOTES.index(i+1)-j1
+                    x = j*video.size[0]/(j2-j1+1)
+                    y = sldrBlackY.val
+                    width = sldrBlackWidth.val
+                    height = sldrBlackHeight.val
+                    col = (0, 255, 0)
+                minX = max(0, int(x-width/2))
+                maxX = int(x+width/2)
+                minY = max(0, int(y-height/2))
+                maxY = int(y+height/2)
+                diff = np.sum(noteRegions[i] - frame[minY:maxY, minX:maxX]) / np.prod(noteRegions[i].shape)
+                frame[minY:maxY, minX:maxX] = (255, 0, 0)
+                frame[int(maxY-height*abs(diff)/255):maxY, minX:maxX] = col
+        subplots.clear()
+        subplots.imshow(frame)
+    def updateSldrTime(d, _):
+        sldrTime.val += d
+        updateDetectionFrame(None)
+    sldrTime = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.7,0.03)), "", startFrameIndex, endFrameIndex, valinit=startFrameIndex, valstep=1)
+    sldrTime.on_changed(updateDetectionFrame)
+    btnPrevFrame = matplotlib.widgets.Button(plt.axes((0.45,0.05,0.05,0.03)), "<")
+    btnPrevFrame.on_clicked(functools.partial(updateSldrTime, -1))
+    btnNextFrame = matplotlib.widgets.Button(plt.axes((0.50,0.05,0.05,0.03)), ">")
+    btnNextFrame.on_clicked(functools.partial(updateSldrTime, 1))
+    updateDetectionFrame(None)
+    plt.show()
