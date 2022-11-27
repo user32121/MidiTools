@@ -14,36 +14,27 @@ parser.add_argument("-d", "--detected", action="store_true", help="display detec
 args = parser.parse_args()
 video = moviepy.editor.VideoFileClip(args.filename)
 audio = video.audio
-numVideoFrames = int(video.end*video.fps)
-numAudioSamples = int(audio.end*audio.fps)
 print("fps: {}".format(video.fps))
 print("audio rate: {}".format(audio.fps))
 
-#get starting reference frame
-startFrameIndex = 0
-
+#get starting reference frame and ending frame
 figure = plt.figure()
-subplots = figure.subplots()
+subplots = figure.subplots(ncols=2)
 plt.subplots_adjust(bottom=0.12)
-def changeStartFrameIndex(d, _):
-    global startFrameIndex
-    startFrameIndex = max(0, min(numVideoFrames, startFrameIndex+d))
-    subplots.clear()
-    subplots.set_title("select the first frame when keyboard is visible")
-    subplots.imshow(video.get_frame(startFrameIndex/video.fps))
-    textStartFrameIndex._text = str(startFrameIndex)
-backBackBtn = matplotlib.widgets.Button(plt.axes((0.40,0.1,0.05,0.05)), "<<")
-backBackBtn.on_clicked(functools.partial(changeStartFrameIndex, -video.fps))
-backBtn = matplotlib.widgets.Button(plt.axes((0.45,0.1,0.05,0.05)), "<")
-backBtn.on_clicked(functools.partial(changeStartFrameIndex, -1))
-nextBtn = matplotlib.widgets.Button(plt.axes((0.50,0.1,0.05,0.05)), ">")
-nextBtn.on_clicked(functools.partial(changeStartFrameIndex, 1))
-nextNextBtn = matplotlib.widgets.Button(plt.axes((0.55,0.1,0.05,0.05)), ">>")
-nextNextBtn.on_clicked(functools.partial(changeStartFrameIndex, int(round(video.fps))))
-textStartFrameIndex = figure.text(0.5, 0.06, str(startFrameIndex), horizontalalignment="center")
-figure.text(0.5, 0.02, "close window to confirm", horizontalalignment="center")
-changeStartFrameIndex(0, None)
+def updateFrameRange(_):
+    subplots[0].clear()
+    subplots[0].set_title("select a starting reference frame when keyboard is visible")
+    subplots[0].imshow(video.get_frame(sldrVidRange.val[0]))
+    subplots[1].clear()
+    subplots[1].set_title("select ending frame")
+    subplots[1].imshow(video.get_frame(sldrVidRange.val[1]))
+sldrVidRange = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.10,0.7,0.03)), "", video.start, video.end-2/video.fps, valinit=(video.start, video.end-2/video.fps))
+sldrVidRange.on_changed(updateFrameRange)
+figure.text(0.5, 0.04, "close window to confirm", horizontalalignment="center")
+updateFrameRange(None)
 plt.show()
+startFrameIndex = int(sldrVidRange.val[0]*video.fps)
+endFrameIndex = int(sldrVidRange.val[1]*video.fps)
 
 #configure detection regions
 whiteY = int((video.size[1]-1)*0.96)
@@ -145,8 +136,8 @@ for i in range(i1, i2+1):
 plt.show()
 
 #configure detection threshold
-diffs = np.zeros((numVideoFrames, max(WHITE_NOTES)+1))
-for frameIndex in tqdm(range(startFrameIndex, numVideoFrames)):
+diffs = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
+for frameIndex in tqdm(range(startFrameIndex, endFrameIndex+1)):
     frame = video.get_frame(frameIndex/video.fps).astype(int)
     for i in range(i1, i2+1):
         if(i in WHITE_NOTES):
@@ -166,7 +157,7 @@ for frameIndex in tqdm(range(startFrameIndex, numVideoFrames)):
         minY = max(0, int(y-height/2))
         maxY = int(y+height/2)
         diff = np.sum(abs(noteRegions[i] - frame[minY:maxY, minX:maxX])) / np.prod(noteRegions[i].shape)
-        diffs[frameIndex, i] = diff
+        diffs[frameIndex-startFrameIndex, i] = diff
 
 figure = plt.figure()
 subplots = figure.subplots()
@@ -192,15 +183,15 @@ prevMidiEventTime = 0
 tempo = 500000  #default tempo, microseconds per beat
 ticksPerBeat = mid.ticks_per_beat
 ticksPerSecond = ticksPerBeat / (tempo / 1000000)
-for frameIndex in range(startFrameIndex, numVideoFrames):
-    seconds = frameIndex/video.fps
+for i in range(endFrameIndex-startFrameIndex+1):
+    seconds = i/video.fps
     ticks = int(seconds * ticksPerSecond)
-    for i in range(128):
-        if(noteOns[frameIndex, i]):
-            track.append(mido.Message("note_on", note=i, velocity=100, time=ticks-prevMidiEventTime))
+    for j in range(128):
+        if(noteOns[i, j]):
+            track.append(mido.Message("note_on", note=j, velocity=100, time=ticks-prevMidiEventTime))
             prevMidiEventTime = ticks
-        if(noteOffs[frameIndex, i]):
-            track.append(mido.Message("note_off", note=i, time=ticks-prevMidiEventTime))
+        if(noteOffs[i, j]):
+            track.append(mido.Message("note_off", note=j, time=ticks-prevMidiEventTime))
             prevMidiEventTime = ticks
 mid.save(args.filename+".mid")
 
@@ -209,11 +200,11 @@ plt.show()
 
 #display detected notes
 if(args.detected):
-    for frameIndex in range(startFrameIndex, numVideoFrames):
-        if(noteOns[frameIndex].any()):
+    for frameIndex in range(startFrameIndex, endFrameIndex+1):
+        if(noteOns[frameIndex-startFrameIndex].any()):
             frame = video.get_frame(frameIndex/video.fps).copy()
             for i in range(i1, i2+1):
-                if(notes[frameIndex, i]):
+                if(notes[frameIndex-startFrameIndex, i]):
                     if(i in WHITE_NOTES):
                         j = WHITE_NOTES.index(i)-j1
                         x = (j+0.5)*video.size[0]/(j2-j1+1)
