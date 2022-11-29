@@ -7,6 +7,8 @@ import functools
 from tqdm import tqdm
 import mido
 
+import utils
+
 parser = argparse.ArgumentParser(description='converts a synthesia-like video into a midi file')
 parser.add_argument("filename")
 parser.add_argument("-d", "--detected", action="store_true", help="display detected notes")
