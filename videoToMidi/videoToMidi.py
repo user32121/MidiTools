@@ -53,14 +53,12 @@ WHITE_NOTES = [
     108,110,112,113,115,117,119,
     120,122,124,125,127,
 ]
+BLACK_NOTES = np.setdiff1d(range(128), WHITE_NOTES)
 figure = plt.figure()
 subplots = figure.subplots()
 plt.subplots_adjust(bottom=0.30)
-def redrawDetectionRegions(_):
-    frame = video.get_frame(startFrameIndex/video.fps).copy()
-    
-    frame[sldrWhiteY.val] = (0, 0, 255)
-    frame[sldrBlackY.val] = (0, 255, 0)
+def getDetectionRegions():
+    regions = [None]*(max(WHITE_NOTES)+1)
     i1 = int(sldrKeyRange.val[0])
     i2 = int(sldrKeyRange.val[1])
     j1 = WHITE_NOTES.index(i1)
@@ -68,109 +66,125 @@ def redrawDetectionRegions(_):
     for i in range(i1, i2+1):
         if(i in WHITE_NOTES):
             j = WHITE_NOTES.index(i)-j1
-            x = (j+0.5)*video.size[0]/(j2-j1+1)
+            x = (j+0.5)*(video.size[0]+sldrLeftExtend.val+sldrRightExtend.val)/(j2-j1+1) - sldrLeftExtend.val
             y = sldrWhiteY.val
             width = sldrWhiteWidth.val
             height = sldrWhiteHeight.val
-            col = (0, 0, 255)
         else:
             j = WHITE_NOTES.index(i+1)-j1
-            x = j*video.size[0]/(j2-j1+1)
+            x = j*(video.size[0]+sldrLeftExtend.val+sldrRightExtend.val)/(j2-j1+1) - sldrLeftExtend.val
             y = sldrBlackY.val
             width = sldrBlackWidth.val
-            height = sldrBlackHeight.val    
-            col = (0, 255, 0)
+            height = sldrBlackHeight.val
+            if(i%12 == 1):
+                x -= sldr2SAdjustment.val
+            elif(i%12 == 3):
+                x += sldr2SAdjustment.val
+            elif(i%12 == 6):
+                x -= sldr3SAdjustment.val
+            elif(i%12 == 10):
+                x += sldr3SAdjustment.val
         minX = max(0, int(x-width/2))
         maxX = int(x+width/2)
         minY = max(0, int(y-height/2))
         maxY = int(y+height/2)
-        frame[minY:maxY, minX:maxX] = col
+        regions[i] = [minX, maxX, minY, maxY]
+    return regions
+def redrawDetectionRegions(_):
+    frame = video.get_frame(startFrameIndex/video.fps).copy()
+    
+    frame[sldrWhiteY.val] = (0, 0, 255)
+    frame[sldrBlackY.val] = (0, 255, 0)
+    regions = getDetectionRegions()
+    for i in range(len(regions)):
+        if(regions[i] == None):
+            continue
+        if(i in WHITE_NOTES):
+            col = (0, 0, 255)
+        else:
+            col = (0, 255, 0)
+        frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]] = col
         
     subplots.clear()
     subplots.set_title("configure detection regions")
     subplots.imshow(frame)
-sldrKeyRange = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.20,0.7,0.03)), "note range", min(WHITE_NOTES), max(WHITE_NOTES), valinit=(21,108), valstep=WHITE_NOTES)
-sldrKeyRange.on_changed(redrawDetectionRegions)
-sldrWhiteY = matplotlib.widgets.Slider(plt.axes((0.15,0.15,0.25,0.03)), "white Y", 0, video.size[1]-1, valinit=whiteY, valstep=1)
-sldrWhiteY.on_changed(redrawDetectionRegions)
-sldrWhiteWidth = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
-sldrWhiteWidth.on_changed(redrawDetectionRegions)
-sldrWhiteHeight = matplotlib.widgets.Slider(plt.axes((0.15,0.05,0.25,0.03)), "height", 0, 100, valinit=20, valstep=1)
-sldrWhiteHeight.on_changed(redrawDetectionRegions)
-sldrBlackY = matplotlib.widgets.Slider(plt.axes((0.6,0.15,0.25,0.03)), "black Y", 0, video.size[1]-1, valinit=blackY, valstep=1)
-sldrBlackY.on_changed(redrawDetectionRegions)
-sldrBlackWidth = matplotlib.widgets.Slider(plt.axes((0.6,0.10,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
-sldrBlackWidth.on_changed(redrawDetectionRegions)
-sldrBlackHeight = matplotlib.widgets.Slider(plt.axes((0.6,0.05,0.25,0.03)), "height", 0, 100, valinit=30, valstep=1)
-sldrBlackHeight.on_changed(redrawDetectionRegions)
+def enableAdvanced(_):
+    btnAdvanced.ax.set_visible(False)
+    plt.subplots_adjust(bottom=0.40)
+    for sldr in sldrs:
+        pos = sldr.ax.get_position()._points.flatten()
+        pos[2:4] -= pos[0:2]
+        pos[1] += 0.1
+        sldr.ax.set_position(pos)
+    for sldr in sldrsAdvanced:
+        sldr.ax.set_visible(True)
+sldrKeyRange = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.22,0.7,0.03)), "note range", min(WHITE_NOTES), max(WHITE_NOTES), valinit=(21,108), valstep=WHITE_NOTES)
+sldrWhiteY = matplotlib.widgets.Slider(plt.axes((0.15,0.17,0.25,0.03)), "white Y", 0, video.size[1]-1, valinit=whiteY, valstep=1)
+sldrWhiteWidth = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
+sldrWhiteHeight = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "height", 0, 100, valinit=20, valstep=1)
+sldrBlackY = matplotlib.widgets.Slider(plt.axes((0.6,0.17,0.25,0.03)), "black Y", 0, video.size[1]-1, valinit=blackY, valstep=1)
+sldrBlackWidth = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
+sldrBlackHeight = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "height", 0, 100, valinit=30, valstep=1)
+sldrs = [sldrKeyRange, sldrWhiteY, sldrWhiteWidth, sldrWhiteHeight, sldrBlackY, sldrBlackWidth, sldrBlackHeight]
+for sldr in sldrs:
+    sldr.on_changed(redrawDetectionRegions)
+btnAdvanced = matplotlib.widgets.Button(plt.axes((0.43,0.02,0.14,0.04)), "advanced")
+btnAdvanced.on_clicked(enableAdvanced)
+sldrLeftExtend = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "left extend", -50, 50, valinit=0, valstep=1)
+sldrRightExtend = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "right extend", -50, 50, valinit=0, valstep=1)
+sldr2SAdjustment = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "2# adjust", -10, 10, valinit=0, valstep=1)
+sldr3SAdjustment = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "3# adjust", -10, 10, valinit=0, valstep=1)
+sldrsAdvanced = [sldrRightExtend, sldrLeftExtend, sldr2SAdjustment, sldr3SAdjustment]
+for sldr in sldrsAdvanced:
+    sldr.ax.set_visible(False)
+    sldr.on_changed(redrawDetectionRegions)
 redrawDetectionRegions(None)
 plt.show()
 
 #save detection regions
 noteRegions = [None]*(max(WHITE_NOTES)+1)
 
-i1 = int(sldrKeyRange.val[0])
-i2 = int(sldrKeyRange.val[1])
-j1 = WHITE_NOTES.index(i1)
-j2 = WHITE_NOTES.index(i2)
+regions = getDetectionRegions()
 frame = video.get_frame(startFrameIndex/video.fps).astype(int)
-for i in range(i1, i2+1):
-    if(i in WHITE_NOTES):
-        j = WHITE_NOTES.index(i)-j1
-        x = (j+0.5)*video.size[0]/(j2-j1+1)
-        y = sldrWhiteY.val
-        width = sldrWhiteWidth.val
-        height = sldrWhiteHeight.val
-    else:
-        j = WHITE_NOTES.index(i+1)-j1
-        x = j*video.size[0]/(j2-j1+1)
-        y = sldrBlackY.val
-        width = sldrBlackWidth.val
-        height = sldrBlackHeight.val    
-    minX = max(0, int(x-width/2))
-    maxX = int(x+width/2)
-    minY = max(0, int(y-height/2))
-    maxY = int(y+height/2)
-    noteRegions[i] = frame[minY:maxY, minX:maxX]
+for i in range(len(regions)):
+    if(regions[i] == None):
+        continue
+    noteRegions[i] = frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]]
 
 plt.show()
 
-#configure detection threshold
+#get diffs
 diffs = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
+regions = getDetectionRegions()
 for frameIndex in tqdm(range(startFrameIndex, endFrameIndex+1)):
     frame = video.get_frame(frameIndex/video.fps).astype(int)
-    for i in range(i1, i2+1):
-        if(i in WHITE_NOTES):
-            j = WHITE_NOTES.index(i)-j1
-            x = (j+0.5)*video.size[0]/(j2-j1+1)
-            y = sldrWhiteY.val
-            width = sldrWhiteWidth.val
-            height = sldrWhiteHeight.val
-        else:
-            j = WHITE_NOTES.index(i+1)-j1
-            x = j*video.size[0]/(j2-j1+1)
-            y = sldrBlackY.val
-            width = sldrBlackWidth.val
-            height = sldrBlackHeight.val
-        minX = max(0, int(x-width/2))
-        maxX = int(x+width/2)
-        minY = max(0, int(y-height/2))
-        maxY = int(y+height/2)
-        diff = np.sum(abs(noteRegions[i] - frame[minY:maxY, minX:maxX])) / np.prod(noteRegions[i].shape)
+    for i in range(len(regions)):
+        if(regions[i] == None):
+            continue
+        diff = np.sum(abs(noteRegions[i] - frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]])) / np.prod(noteRegions[i].shape)
         diffs[frameIndex-startFrameIndex, i] = diff
 
+#configure detection threshold
 figure = plt.figure()
-subplots = figure.subplots()
+subplots = figure.subplots(ncols=2)
 plt.subplots_adjust(bottom=0.20)
-subplots.hist(diffs.flatten(), bins=40)
-plt.yscale("log")
-subplots.set_title("select rgb distance threshold")
-sldrThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.7,0.03)), "threshold", 0, int(np.max(diffs))+1, valinit=50, valstep=1)
+subplots[0].hist(diffs[WHITE_NOTES].flatten(), bins=40)
+subplots[0].set_yscale("log")
+subplots[0].set_title("white diffs")
+subplots[1].hist(diffs[BLACK_NOTES].flatten(), bins=40)
+subplots[1].set_yscale("log")
+subplots[1].set_title("black diffs")
+figure.text(0.5, 0.95, "select rgb distance threshold", horizontalalignment="center")
+sldrWhiteThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.7,0.03)), "white threshold", 0, int(subplots[0].get_xlim()[1])+1, valinit=50, valstep=1)
+sldrBlackThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.05,0.7,0.03)), "black threshold", 0, int(subplots[1].get_xlim()[1])+1, valinit=50, valstep=1)
 plt.show()
-threshold = sldrThreshold.val
+whiteThreshold = sldrWhiteThreshold.val
+blackThreshold = sldrBlackThreshold.val
 
 #extract notes
-notes = (diffs >= threshold).astype(int)
+notes = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
+notes[:,WHITE_NOTES] = (diffs[:,WHITE_NOTES] >= whiteThreshold).astype(int)
+notes[:,BLACK_NOTES] = (diffs[:,BLACK_NOTES] >= blackThreshold).astype(int)
 noteOns = np.pad(notes[1:] - notes[:-1], ((1,0),(0,0))) > 0
 noteOffs = np.pad(notes[1:] - notes[:-1], ((1,0),(0,0))) < 0
 
@@ -206,29 +220,18 @@ if(args.detected):
     def updateDetectionFrame(_):
         frameIndex = sldrTime.val
         frame = video.get_frame(frameIndex/video.fps).copy()
-        for i in range(i1, i2+1):
+        regions = getDetectionRegions()
+        for i in range(len(regions)):
+            if(regions[i] == None):
+                continue
             if(notes[frameIndex-startFrameIndex, i]):
                 if(i in WHITE_NOTES):
-                    j = WHITE_NOTES.index(i)-j1
-                    x = (j+0.5)*video.size[0]/(j2-j1+1)
-                    y = sldrWhiteY.val
-                    width = sldrWhiteWidth.val
-                    height = sldrWhiteHeight.val
                     col = (0, 0, 255)
                 else:
-                    j = WHITE_NOTES.index(i+1)-j1
-                    x = j*video.size[0]/(j2-j1+1)
-                    y = sldrBlackY.val
-                    width = sldrBlackWidth.val
-                    height = sldrBlackHeight.val
                     col = (0, 255, 0)
-                minX = max(0, int(x-width/2))
-                maxX = int(x+width/2)
-                minY = max(0, int(y-height/2))
-                maxY = int(y+height/2)
-                diff = np.sum(noteRegions[i] - frame[minY:maxY, minX:maxX]) / np.prod(noteRegions[i].shape)
-                frame[minY:maxY, minX:maxX] = (255, 0, 0)
-                frame[int(maxY-height*abs(diff)/255):maxY, minX:maxX] = col
+                frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]] = (255, 0, 0)
+                height = regions[i][2]-regions[i][1]
+                frame[int(regions[i][3]-height*abs(diff)/255):regions[i][3], regions[i][0]:regions[i][1]] = col
         subplots.clear()
         subplots.imshow(frame)
     def updateSldrTime(d, _):
