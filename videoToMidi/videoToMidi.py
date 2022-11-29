@@ -1,9 +1,11 @@
 import argparse
+import functools
+import colorsys
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.widgets
 import moviepy.editor
-import functools
 from tqdm import tqdm
 import mido
 
@@ -37,6 +39,7 @@ updateFrameRange(None)
 plt.show()
 startFrameIndex = int(sldrVidRange.val[0]*video.fps)
 endFrameIndex = int(sldrVidRange.val[1]*video.fps)
+print("frames: {}".format(endFrameIndex-startFrameIndex+1))
 
 #configure detection regions
 whiteY = int((video.size[1]-1)*0.96)
@@ -122,20 +125,20 @@ def enableAdvanced(_):
         sldr.ax.set_visible(True)
 sldrKeyRange = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.22,0.7,0.03)), "note range", min(WHITE_NOTES), max(WHITE_NOTES), valinit=(21,108), valstep=WHITE_NOTES)
 sldrWhiteY = matplotlib.widgets.Slider(plt.axes((0.15,0.17,0.25,0.03)), "white Y", 0, video.size[1]-1, valinit=whiteY, valstep=1)
-sldrWhiteWidth = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
-sldrWhiteHeight = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "height", 0, 100, valinit=20, valstep=1)
+sldrWhiteWidth = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "width", 1, 50, valinit=2, valstep=1)
+sldrWhiteHeight = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "height", 1, 100, valinit=20, valstep=1)
 sldrBlackY = matplotlib.widgets.Slider(plt.axes((0.6,0.17,0.25,0.03)), "black Y", 0, video.size[1]-1, valinit=blackY, valstep=1)
-sldrBlackWidth = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "width", 0, 50, valinit=2, valstep=1)
-sldrBlackHeight = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "height", 0, 100, valinit=30, valstep=1)
+sldrBlackWidth = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "width", 1, 50, valinit=2, valstep=1)
+sldrBlackHeight = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "height", 1, 100, valinit=30, valstep=1)
 sldrs = [sldrKeyRange, sldrWhiteY, sldrWhiteWidth, sldrWhiteHeight, sldrBlackY, sldrBlackWidth, sldrBlackHeight]
 for sldr in sldrs:
     sldr.on_changed(redrawDetectionRegions)
 btnAdvanced = matplotlib.widgets.Button(plt.axes((0.43,0.02,0.14,0.04)), "advanced")
 btnAdvanced.on_clicked(enableAdvanced)
-sldrLeftExtend = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "left extend", -50, 50, valinit=0, valstep=1)
-sldrRightExtend = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "right extend", -50, 50, valinit=0, valstep=1)
-sldr2SAdjustment = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "2# adjust", -10, 10, valinit=0, valstep=1)
-sldr3SAdjustment = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "3# adjust", -10, 10, valinit=0, valstep=1)
+sldrLeftExtend = matplotlib.widgets.Slider(plt.axes((0.15,0.12,0.25,0.03)), "left extend", -20, 20, valinit=0, valstep=1)
+sldrRightExtend = matplotlib.widgets.Slider(plt.axes((0.6,0.12,0.25,0.03)), "right extend", -20, 20, valinit=0, valstep=1)
+sldr2SAdjustment = matplotlib.widgets.Slider(plt.axes((0.15,0.07,0.25,0.03)), "2# adjust", -10, 10, valinit=1, valstep=1)
+sldr3SAdjustment = matplotlib.widgets.Slider(plt.axes((0.6,0.07,0.25,0.03)), "3# adjust", -10, 10, valinit=1, valstep=1)
 sldrsAdvanced = [sldrRightExtend, sldrLeftExtend, sldr2SAdjustment, sldr3SAdjustment]
 for sldr in sldrsAdvanced:
     sldr.ax.set_visible(False)
@@ -157,14 +160,16 @@ plt.show()
 
 #get diffs
 diffs = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
+hues = np.zeros_like(diffs)
 regions = getDetectionRegions()
 for frameIndex in tqdm(range(startFrameIndex, endFrameIndex+1)):
     frame = video.get_frame(frameIndex/video.fps).astype(int)
     for i in range(len(regions)):
         if(regions[i] == None):
             continue
-        diff = np.sum(abs(noteRegions[i] - frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]])) / np.prod(noteRegions[i].shape)
+        diff = np.sum(abs(noteRegions[i] - frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]])) / np.size(noteRegions[i])
         diffs[frameIndex-startFrameIndex, i] = diff
+        hues[frameIndex-startFrameIndex, i] = colorsys.rgb_to_hsv(*(np.mean(frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]], axis=(0,1))/255))[0]
 
 #configure detection threshold
 figure = plt.figure()
@@ -184,18 +189,24 @@ whiteThreshold = sldrWhiteThreshold.val
 blackThreshold = sldrBlackThreshold.val
 
 #extract notes
-notes = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
+notes = np.zeros_like(diffs, dtype=int)
 notes[:,WHITE_NOTES] = (diffs[:,WHITE_NOTES] >= whiteThreshold).astype(int)
 notes[:,BLACK_NOTES] = (diffs[:,BLACK_NOTES] >= blackThreshold).astype(int)
-noteOns = np.pad(notes[1:] - notes[:-1], ((1,0),(0,0))) > 0
-noteOffs = np.pad(notes[1:] - notes[:-1], ((1,0),(0,0))) < 0
+#auto cluster notes
+notes, numTracks = utils.clusterByHue(notes, hues)
+noteOns = np.zeros_like(notes)
+noteOns[1:] = np.logical_and(notes[:-1] != notes[1:], notes[1:] != 0)
+noteOns[0] = notes[0]
+noteOffs = np.zeros_like(notes)
+noteOffs[1:] = np.logical_and(notes[:-1] != notes[1:], notes[:-1] != 0)
+noteOffs[-1] = notes[-1]
 
-print("detected {} notes".format(np.sum(noteOns)))
+print("detected {} notes".format(np.sum(noteOns > 0)))
 
 mid = mido.MidiFile()
-track = mido.MidiTrack()
-mid.tracks.append(track)
-prevMidiEventTime = 0
+for _ in range(numTracks+1):
+    mid.tracks.append(mido.MidiTrack())
+prevMidiEventTime = [0]*(numTracks+1)
 tempo = 500000  #default tempo, microseconds per beat
 ticksPerBeat = mid.ticks_per_beat
 ticksPerSecond = ticksPerBeat / (tempo / 1000000)
@@ -204,11 +215,13 @@ for i in range(endFrameIndex-startFrameIndex+1):
     ticks = int(seconds * ticksPerSecond)
     for j in range(128):
         if(noteOns[i, j]):
-            track.append(mido.Message("note_on", note=j, velocity=100, time=ticks-prevMidiEventTime))
-            prevMidiEventTime = ticks
+            track = notes[i,j]
+            mid.tracks[track].append(mido.Message("note_on", note=j, velocity=100, time=ticks-prevMidiEventTime[track]))
+            prevMidiEventTime[track] = ticks
         if(noteOffs[i, j]):
-            track.append(mido.Message("note_off", note=j, time=ticks-prevMidiEventTime))
-            prevMidiEventTime = ticks
+            track = notes[i-1,j]
+            mid.tracks[track].append(mido.Message("note_off", note=j, time=ticks-prevMidiEventTime[track]))
+            prevMidiEventTime[track] = ticks
 mid.save(args.filename+".mid")
 
 plt.imshow(np.swapaxes(notes, 0, 1))
