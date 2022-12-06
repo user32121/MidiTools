@@ -13,7 +13,8 @@ import utils
 
 parser = argparse.ArgumentParser(description='converts a synthesia-like video into a midi file')
 parser.add_argument("filename")
-parser.add_argument("-d", "--detected", action="store_true", help="display detected notes")
+parser.add_argument("-d", "--detected", action="store_true", help="display detected notes (ignores -s)")
+parser.add_argument("-s", "--skip-GUI", action="store_true", help="skip any matplotlib GUI and use defaults")
 
 args = parser.parse_args()
 video = moviepy.editor.VideoFileClip(args.filename)
@@ -36,7 +37,8 @@ sldrVidRange = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.10,0.7,0.03)), ""
 sldrVidRange.on_changed(updateFrameRange)
 figure.text(0.5, 0.04, "close window to confirm", horizontalalignment="center")
 updateFrameRange(None)
-plt.show()
+if(not args.skip_GUI):
+    plt.show()
 startFrameIndex = int(sldrVidRange.val[0]*video.fps)
 endFrameIndex = int(sldrVidRange.val[1]*video.fps)
 print("frames: {}".format(endFrameIndex-startFrameIndex+1))
@@ -59,6 +61,7 @@ WHITE_NOTES = [
     120,122,124,125,127,
 ]
 BLACK_NOTES = np.setdiff1d(range(128), WHITE_NOTES)
+
 figure = plt.figure()
 subplots = figure.subplots()
 plt.subplots_adjust(bottom=0.30)
@@ -144,7 +147,8 @@ for sldr in sldrsAdvanced:
     sldr.ax.set_visible(False)
     sldr.on_changed(redrawDetectionRegions)
 redrawDetectionRegions(None)
-plt.show()
+if(not args.skip_GUI):
+    plt.show()
 
 #save detection regions
 noteRegions = [None]*(max(WHITE_NOTES)+1)
@@ -155,8 +159,6 @@ for i in range(len(regions)):
     if(regions[i] == None):
         continue
     noteRegions[i] = frame[regions[i][2]:regions[i][3], regions[i][0]:regions[i][1]]
-
-plt.show()
 
 #get diffs
 diffs = np.zeros((endFrameIndex-startFrameIndex+1, max(WHITE_NOTES)+1))
@@ -175,16 +177,19 @@ for frameIndex in tqdm(range(startFrameIndex, endFrameIndex+1)):
 figure = plt.figure()
 subplots = figure.subplots(ncols=2)
 plt.subplots_adjust(bottom=0.20)
-subplots[0].hist(diffs[WHITE_NOTES].flatten(), bins=40)
+subplots[0].hist(diffs[:,WHITE_NOTES].flatten(), bins=40)
 subplots[0].set_yscale("log")
 subplots[0].set_title("white diffs")
-subplots[1].hist(diffs[BLACK_NOTES].flatten(), bins=40)
+subplots[1].hist(diffs[:,BLACK_NOTES].flatten(), bins=40)
 subplots[1].set_yscale("log")
 subplots[1].set_title("black diffs")
 figure.text(0.5, 0.95, "select rgb distance threshold", horizontalalignment="center")
-sldrWhiteThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.7,0.03)), "white threshold", 0, int(subplots[0].get_xlim()[1])+1, valinit=50, valstep=1)
-sldrBlackThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.05,0.7,0.03)), "black threshold", 0, int(subplots[1].get_xlim()[1])+1, valinit=50, valstep=1)
-plt.show()
+whiteDiffMax = int(np.max(diffs[:,WHITE_NOTES]))
+sldrWhiteThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.10,0.7,0.03)), "white threshold", 0, whiteDiffMax+1, valinit=whiteDiffMax//2, valstep=1)
+blackDiffMax = int(np.max(diffs[:,BLACK_NOTES]))
+sldrBlackThreshold = matplotlib.widgets.Slider(plt.axes((0.15,0.05,0.7,0.03)), "black threshold", 0, blackDiffMax+1, valinit=blackDiffMax//2, valstep=1)
+if(not args.skip_GUI):
+    plt.show()
 whiteThreshold = sldrWhiteThreshold.val
 blackThreshold = sldrBlackThreshold.val
 
@@ -203,6 +208,66 @@ noteOffs[-1] = notes[-1]
 
 print("detected {} notes".format(np.sum(noteOns > 0)))
 
+#get audio
+startAudioIndex = int(sldrVidRange.val[0]*audio.fps)
+endAudioIndex = int(sldrVidRange.val[1]*audio.fps)
+print("audio samples: {}".format(endAudioIndex-startAudioIndex+1))
+audioSamples = np.zeros((endAudioIndex-startAudioIndex+1, audio.nchannels))
+for i in tqdm(range(startAudioIndex, endAudioIndex+1)):
+    audioSamples[i-startAudioIndex] = audio.get_frame(i/audio.fps)
+
+#get first note
+noteAudioIndex = -1
+for i in range(startFrameIndex, endFrameIndex+1):
+    for j in range(128):
+        if(noteOns[i-startFrameIndex, j]):
+            noteAudioIndex = int(i/video.fps*audio.fps)
+
+#get detection offset
+figure = plt.figure()
+subplots = figure.subplots()
+plt.subplots_adjust(bottom=0.30)
+def displayFFTWindow(_):
+    audioSample = audioSamples[int(noteAudioIndex+sldrFFTWindow.val[0]*audio.fps):int(noteAudioIndex+sldrFFTWindow.val[1]*audio.fps+1)]
+    subplots.clear()
+    subplots.set_title("configure fft window")
+    subplots.imshow(audioSample)
+    print(audioSample.shape)
+sldrFFTWindow = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.10,0.7,0.03)), "", -1, 1, valinit=(0, 0.3))
+sldrFFTWindow.on_changed(displayFFTWindow)
+if(not args.skip_GUI):
+    plt.show()
+
+#TODO extract velocity information from audio
+fftWindowOffsetStart = sldrFFTWindow.val[0]*audio.fps
+fftWindowOffsetEnd = sldrFFTWindow.val[1]*audio.fps
+print("fft window offset: {} samples ({} frames)".format(fftWindowOffsetStart, fftWindowOffsetStart / audio.fps * video.fps))
+print("fft window size: {} samples ({} frames)".format(fftWindowOffsetEnd-fftWindowOffsetStart, (fftWindowOffsetEnd-fftWindowOffsetStart) / audio.fps * video.fps))
+volumes = np.zeros_like(noteOns)
+for i in range(startFrameIndex, endFrameIndex+1):
+    for j in range(128):
+        if(noteOns[i-startFrameIndex, j]):
+            fftWindowStart = max(int(i / video.fps * audio.fps + fftWindowOffsetStart), startAudioIndex)
+            fftWindowEnd = min(int(i / video.fps * audio.fps) + fftWindowOffsetEnd, endAudioIndex)
+            fft = np.fft.fft(audioSamples[fftWindowStart-startAudioIndex:fftWindowEnd-startAudioIndex], axis=0)
+            freqMin = int(440 * 2**((j-69-0.5)/12))
+            freqMax = int(440 * 2**((j-69+0.5)/12))
+            volume = np.max(np.abs(fft[freqMin:freqMax]))
+            if(volume > 1 or True):
+                plt.subplot(1,2,1)
+                plt.plot(audioSamples[fftWindowStart-startAudioIndex:fftWindowEnd-startAudioIndex])
+                plt.subplot(1,2,2)
+                plt.plot(fft)
+                plt.show()
+            volumes[i-startFrameIndex, j] = volume
+volumes = np.minimum(volumes, 127)
+if(not args.skip_GUI):
+    plt.hist(volumes.flatten()[volumes.flatten() != 0], bins=20)
+    plt.yscale("log")
+    plt.show()
+
+#TODO configure audio-video sync
+
 mid = mido.MidiFile()
 for _ in range(numTracks+1):
     mid.tracks.append(mido.MidiTrack())
@@ -216,7 +281,7 @@ for i in range(endFrameIndex-startFrameIndex+1):
     for j in range(128):
         if(noteOns[i, j]):
             track = notes[i,j]
-            mid.tracks[track].append(mido.Message("note_on", note=j, velocity=100, time=ticks-prevMidiEventTime[track]))
+            mid.tracks[track].append(mido.Message("note_on", note=j, velocity=volumes[i,j], time=ticks-prevMidiEventTime[track]))
             prevMidiEventTime[track] = ticks
         if(noteOffs[i, j]):
             track = notes[i-1,j]
@@ -224,8 +289,9 @@ for i in range(endFrameIndex-startFrameIndex+1):
             prevMidiEventTime[track] = ticks
 mid.save(args.filename+".mid")
 
-plt.imshow(np.swapaxes(notes, 0, 1))
-plt.show()
+if(not args.skip_GUI):
+    plt.imshow(np.swapaxes(notes, 0, 1))
+    plt.show()
 
 #display detected notes
 if(args.detected):
