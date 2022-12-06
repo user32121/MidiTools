@@ -8,6 +8,7 @@ import matplotlib.widgets
 import moviepy.editor
 from tqdm import tqdm
 import mido
+import pyaudio
 
 import utils
 
@@ -221,7 +222,17 @@ noteAudioIndex = -1
 for i in range(startFrameIndex, endFrameIndex+1):
     for j in range(128):
         if(noteOns[i-startFrameIndex, j]):
-            noteAudioIndex = int(i/video.fps*audio.fps)
+            noteAudioIndex = int(i/video.fps*audio.fps - startAudioIndex)
+            break
+    else:
+        continue
+    break
+
+audioStream = pyaudio.PyAudio().open(
+    format = pyaudio.paFloat32,
+    channels = audio.nchannels,
+    rate = audio.fps,
+    output = True)
 
 #get detection offset
 figure = plt.figure()
@@ -231,10 +242,15 @@ def displayFFTWindow(_):
     audioSample = audioSamples[int(noteAudioIndex+sldrFFTWindow.val[0]*audio.fps):int(noteAudioIndex+sldrFFTWindow.val[1]*audio.fps+1)]
     subplots.clear()
     subplots.set_title("configure fft window")
-    subplots.imshow(audioSample)
-    print(audioSample.shape)
+    subplots.plot(audioSample)
+def playAudio(_):
+    audioSample = audioSamples[int(noteAudioIndex+sldrFFTWindow.val[0]*audio.fps):int(noteAudioIndex+sldrFFTWindow.val[1]*audio.fps+1)]
+    audioStream.write(audioSample.astype(np.float32).tobytes())
 sldrFFTWindow = matplotlib.widgets.RangeSlider(plt.axes((0.15,0.10,0.7,0.03)), "", -1, 1, valinit=(0, 0.3))
 sldrFFTWindow.on_changed(displayFFTWindow)
+btnPlay = matplotlib.widgets.Button(plt.axes((0.43,0.05,0.14,0.04)), "play")
+btnPlay.on_clicked(playAudio)
+displayFFTWindow(None)
 if(not args.skip_GUI):
     plt.show()
 
@@ -243,30 +259,31 @@ fftWindowOffsetStart = sldrFFTWindow.val[0]*audio.fps
 fftWindowOffsetEnd = sldrFFTWindow.val[1]*audio.fps
 print("fft window offset: {} samples ({} frames)".format(fftWindowOffsetStart, fftWindowOffsetStart / audio.fps * video.fps))
 print("fft window size: {} samples ({} frames)".format(fftWindowOffsetEnd-fftWindowOffsetStart, (fftWindowOffsetEnd-fftWindowOffsetStart) / audio.fps * video.fps))
-volumes = np.zeros_like(noteOns)
-for i in range(startFrameIndex, endFrameIndex+1):
+volumes = np.zeros_like(noteOns, dtype=float)
+for i in tqdm(range(startFrameIndex, endFrameIndex+1)):
     for j in range(128):
         if(noteOns[i-startFrameIndex, j]):
             fftWindowStart = max(int(i / video.fps * audio.fps + fftWindowOffsetStart), startAudioIndex)
             fftWindowEnd = min(int(i / video.fps * audio.fps) + fftWindowOffsetEnd, endAudioIndex)
-            fft = np.fft.fft(audioSamples[fftWindowStart-startAudioIndex:fftWindowEnd-startAudioIndex], axis=0)
-            freqMin = int(440 * 2**((j-69-0.5)/12))
-            freqMax = int(440 * 2**((j-69+0.5)/12))
-            volume = np.max(np.abs(fft[freqMin:freqMax]))
-            if(volume > 1 or True):
-                plt.subplot(1,2,1)
-                plt.plot(audioSamples[fftWindowStart-startAudioIndex:fftWindowEnd-startAudioIndex])
-                plt.subplot(1,2,2)
-                plt.plot(fft)
-                plt.show()
+            fft = np.fft.fft(audioSamples[int(fftWindowStart-startAudioIndex):int(fftWindowEnd-startAudioIndex)], axis=0) #, norm="ortho")
+            #https://dsp.stackexchange.com/a/72077
+            N = len(fft)
+            T = 1/audio.fps
+            freqBins = np.fft.fftfreq(len(fft), d=T)
+            targetFreq = 440 * 2**((j-69)/12)
+            volume = 0
+            curFreq = targetFreq
+            while True:
+                index, = np.nonzero(np.isclose(freqBins, curFreq, atol=1/(T*N)))
+                if(index.size == 0):
+                    break
+                volume += np.mean(np.abs(fft[index[0]]))
+                curFreq += targetFreq
             volumes[i-startFrameIndex, j] = volume
-volumes = np.minimum(volumes, 127)
-if(not args.skip_GUI):
-    plt.hist(volumes.flatten()[volumes.flatten() != 0], bins=20)
-    plt.yscale("log")
-    plt.show()
+#normalize
+volumes = np.maximum(1, (volumes / np.max(volumes) * 127).astype(int))
 
-#TODO configure audio-video sync
+#configure volume multiplier
 
 mid = mido.MidiFile()
 for _ in range(numTracks+1):
